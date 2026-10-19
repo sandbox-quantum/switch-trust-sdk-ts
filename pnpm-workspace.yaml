@@ -1,0 +1,22 @@
+# The SDK loads every optional peer (provider SDKs, LangChain, ADK) dynamically at
+# runtime, so the dev build/typecheck/tests never import them. Disabling peer
+# auto-install keeps those optional peers — and their transitive advisories — out
+# of the dev lockfile. See the "Install matrix" section in README.md.
+autoInstallPeers: false
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true
+  sqlite3: true
+minimumReleaseAgeExclude:
+  - '@google/genai@2.8.0'
+onlyBuiltDependencies: []
+overrides:
+  # GHSA-5p4m-2wfm-xmqj: quadratic-complexity !!omap DoS, fixed in 4.3.1.
+  js-yaml: '>=4.3.1'
+  tar: '>=7.5.21'
+  # Force patched transitive build-time deps (pulled in via vitest -> vite).
+  postcss: '>=8.5.18'
+  nanoid: '>=3.3.18'
+  esbuild: '>=0.28.1'
+  source-map-js: '>=1.2.2'

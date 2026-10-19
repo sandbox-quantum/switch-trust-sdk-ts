@@ -1,0 +1,122 @@
+{
+  "name": "@sandboxaq/switch-trust-sdk-ts",
+  "version": "0.5.2",
+  "description": "Lightweight SDK for routing AI agent LLM traffic through a guardrails proxy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandbox-quantum/switch-trust-sdk-ts.git"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./plugins/adk": {
+      "import": {
+        "types": "./dist/plugins/adk.d.ts",
+        "default": "./dist/plugins/adk.js"
+      },
+      "require": {
+        "types": "./dist/plugins/adk.d.cts",
+        "default": "./dist/plugins/adk.cjs"
+      }
+    },
+    "./plugins/langchain": {
+      "import": {
+        "types": "./dist/plugins/langchain.d.ts",
+        "default": "./dist/plugins/langchain.js"
+      },
+      "require": {
+        "types": "./dist/plugins/langchain.d.cts",
+        "default": "./dist/plugins/langchain.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:e2e": "tsx e2e/smoke-test.ts",
+    "test:e2e:sdk-framework-provider-matrix": "tsx e2e/sdk-framework-provider-matrix-test.ts",
+    "typecheck": "tsc --noEmit",
+    "audit": "pnpm audit",
+    "audit:report": "pnpm audit --json > audit-report.json || true",
+    "license:report": "pnpm licenses list --json > license-report.json",
+    "sbom": "pnpm dlx @cyclonedx/cdxgen@12.8.3 -t pnpm -o sbom.cdx.json",
+    "pack:verify": "npm pack && shasum -a 256 *.tgz && npm publish --dry-run"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@google/adk": "^1.2.0",
+    "@google/genai": "^2.8.0",
+    "@langchain/anthropic": "^1.4.0",
+    "@langchain/google-genai": "^2.1.31",
+    "@langchain/openai": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "langchain": "^1.5.0",
+    "openai": "^6.41.0"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    },
+    "@langchain/openai": {
+      "optional": true
+    },
+    "@langchain/anthropic": {
+      "optional": true
+    },
+    "@langchain/google-genai": {
+      "optional": true
+    },
+    "@google/adk": {
+      "optional": true
+    },
+    "dotenv": {
+      "optional": true
+    },
+    "langchain": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@google/genai": "^2.8.0",
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.8",
+    "dotenv": "^17.4.2",
+    "openai": "^6.41.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "author": {
+    "name": "Switch Trust Contributors"
+  },
+  "packageManager": "pnpm@11.5.2"
+}

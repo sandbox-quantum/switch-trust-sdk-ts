@@ -1,0 +1,249 @@
+name: Publish to npm
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release tag
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    outputs:
+      dist_tag: ${{ steps.version.outputs.dist_tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify signed release tag
+        run: |
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" "+refs/heads/main:refs/remotes/origin/main"
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse "${TAG}^{commit}")" ]; then
+            echo "::error::checked-out commit $(git rev-parse HEAD) is not the commit $TAG points at"
+            exit 1
+          fi
+          if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
+            echo "::error::$TAG is a lightweight tag; release tags must be annotated and signed (git tag -s)"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${TAG}^{commit}" origin/main; then
+            echo "::error::$TAG does not point at a commit on main"
+            exit 1
+          fi
+          signers="$RUNNER_TEMP/release-signers"
+          git show origin/main:.github/release-signers > "$signers"
+          if ! git -c gpg.ssh.allowedSignersFile="$signers" verify-tag "$TAG"; then
+            echo "::error::$TAG is not signed by an authorized release signer"
+            exit 1
+          fi
+          tagger_email="$(git for-each-ref --format='%(taggeremail:trim)' "refs/tags/${TAG}")"
+          case "$tagger_email" in
+            *@users.noreply.github.com) ;;
+            *)
+              echo "::error::$TAG tagger email is not a GitHub noreply address; delete the tag and re-tag with a users.noreply.github.com user.email (RELEASE.md)"
+              exit 1
+              ;;
+          esac
+      - name: No GitHub release may exist for the tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::a GitHub release for $TAG already exists; publish.yml creates it after npm, and releases are immutable (RELEASE.md)"
+            exit 1
+          fi
+      - name: package.json repository must be this repo
+        run: |
+          url="$(node -p "const r = require('./package.json').repository; (typeof r === 'string' ? r : r && r.url) || ''")"
+          normalized="${url#git+}"
+          normalized="${normalized%.git}"
+          if [ "$normalized" != "https://github.com/${GITHUB_REPOSITORY}" ]; then
+            echo "::error::package.json repository.url is '${url}'; npm provenance needs https://github.com/${GITHUB_REPOSITORY} (set it in the SDK source)"
+            exit 1
+          fi
+      - name: Tag must match the package version and have a CHANGELOG entry
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *+*)
+              echo "::error::package.json version ${version} has build metadata (+); npm drops it, so release versions must not use it"
+              exit 1
+              ;;
+            *-*) echo "dist_tag=next" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error::tag $TAG does not match package.json version v${version}"
+            exit 1
+          fi
+          if ! grep -qxF "### ${version}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '### ${version}' heading; rename '### Unreleased' to it in the SDK source before releasing"
+            exit 1
+          fi
+
+  release-audit:
+    name: Release audit
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/release-audit
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-audit
+          path: |
+            release/
+            pnpm-lock.yaml
+          if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
+
+  # Separate from build so the dlx-fetched checkers never run alongside the published tarball.
+  package-check:
+    name: Check package metadata
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+      - name: Build
+        run: pnpm run build
+      - name: Check package metadata
+        env:
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+        run: |
+          npm publish --dry-run ${DIST_TAG:+--tag "$DIST_TAG"}
+          make package-check
+
+  test:
+    name: Test and typecheck
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+      - name: Test
+        run: pnpm run test
+      - name: Typecheck
+        run: pnpm run typecheck
+
+  build:
+    name: Build package
+    needs: [release-audit, package-check, test]
+    runs-on: ubuntu-latest
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+      - name: Build
+        run: pnpm run build
+      - name: Pack and hash tarball
+        id: pack
+        run: |
+          mkdir -p package
+          npm pack --pack-destination package
+          TARBALL="$(cd package && ls -- *.tgz)"
+          SHA256="$(cd package && sha256sum -- "$TARBALL" | cut -d ' ' -f 1)"
+          echo "$SHA256  $TARBALL" > package/tarball.sha256
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          {
+            echo "### npm tarball"
+            echo '```'
+            cat package/tarball.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          path: package/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/@sandboxaq/switch-trust-sdk-ts
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+          path: package/
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Require npm 11.5.1 or newer for trusted publishing
+        run: |
+          NPM_VERSION="$(npm --version)"
+          echo "node $(node --version), npm $NPM_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          if ! printf '%s\n' 11.5.1 "$NPM_VERSION" | sort -V -C; then
+            echo "::error::npm $NPM_VERSION is older than 11.5.1; trusted publishing would fail"
+            exit 1
+          fi
+      - name: Verify tarball against the build job's hash
+        working-directory: package
+        env:
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: echo "$SHA256  $TARBALL" | sha256sum -c -
+      - name: Publish to npm
+        working-directory: package
+        env:
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+        run: npm publish "./$TARBALL" --access public ${DIST_TAG:+--tag "$DIST_TAG"}
+
+  github-release:
+    name: Create the GitHub release with audit reports
+    needs: [verify, release-audit, build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download audit reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-audit
+          path: audit/
+      - name: Download tarball hash
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+          path: package/
+      - name: Create the release with the audit reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+        run: |
+          files=(audit/release/* audit/pnpm-lock.yaml package/tarball.sha256)
+          gh release create "$TAG" "${files[@]}" --verify-tag --title "$TAG" --generate-notes ${DIST_TAG:+--prerelease} -R "$GITHUB_REPOSITORY"

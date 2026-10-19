@@ -1,0 +1,36 @@
+# Contributing to Switch Trust SDK (TypeScript)
+
+Thank you for your interest in the Switch Trust SDK.
+
+## Contribution policy
+
+At this time, **we do not accept external code contributions**. Pull requests from outside the team will not be merged.
+
+This is not a reflection on the quality of any contribution — it allows us to maintain tight control over the codebase, security posture, and release process.
+
+## How you can help
+
+- **Bug reports:** [open an issue](https://github.com/sandbox-quantum/switch-trust-sdk-ts/issues/new)
+  with a minimal reproducible example and the version of
+  `@sandboxaq/switch-trust-sdk-ts` you are using.
+- **Feature requests:** open an issue describing the use case.
+- **Questions:** open an issue.
+
+## Security issues
+
+Do not open a public issue for a vulnerability. Follow [SECURITY.md](SECURITY.md)
+to report it privately.
+
+## Building locally
+
+```bash
+pnpm install       # Install dependencies
+pnpm test          # Run test suite
+pnpm typecheck     # Type-check without emitting
+pnpm build         # Build dist/
+```
+
+## License
+
+This SDK is licensed under the terms in [LICENSE](LICENSE): Apache 2.0, as
+limited by a modified Commons Clause license condition.
